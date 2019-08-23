@@ -1,5 +1,6 @@
+mod errors;
+
 use crates_index::{Crate, Dependency, Index};
-use err_derive::Error;
 use heck::KebabCase;
 use lexpr::sexp;
 use rustbreak::Database;
@@ -11,9 +12,12 @@ use std::{
     fs::File,
     io::copy,
     ops::Not,
+    path::Path,
 };
 use structopt::StructOpt;
 use tempdir::TempDir;
+use serde::{Deserialize,Serialize};
+use errors::CarguixError;
 
 #[derive(Debug, StructOpt)]
 #[structopt(about = "Generate Guix package definition for Rust crates")]
@@ -29,65 +33,13 @@ struct Cli {
     version: Option<String>,
 }
 
-#[derive(Debug, Error)]
-pub enum CarguixError {
-    #[error(display = "could not create temporary directory")]
-    TmpdirError(#[error(cause)] std::io::Error),
-    #[error(display = "could not open hash database (crates_hash.db)")]
-    HashdbError(#[error(cause)] rustbreak::BreakError),
-    #[error(display = "could not update index")]
-    IndexUpdateError(#[error(cause)] crates_index::Error),
-    #[error(display = "could not package version {:?} of crate {}", version, name)]
-    CratePackagingFailed {
-        name: String,
-        version: Option<String>,
-    },
-    #[error(display = "could not find crate {}", _0)]
-    CrateNotFound(String),
-    #[error(display = "failure while retrieving key {:?} in hash database", _0)]
-    HashRetrieveFailed(#[error(cause)] rustbreak::BreakError, (String, String)),
-    #[error(display = "could not download crate {}", _0)]
-    CrateDownloadError(#[error(cause)] reqwest::Error, String),
-    #[error(display = "could not create crate {} destination file", _0)]
-    FileCreationFailed(#[error(cause)] std::io::Error, String),
-    #[error(display = "failure while inserting key {:?} in hash database", _0)]
-    HashInsertionFailed(#[error(cause)] rustbreak::BreakError, (String, String)),
-    #[error(display = "could not flush hash database")]
-    HashDatabaseFlushFailed(#[error(cause)] rustbreak::BreakError),
-    #[error(display = "could not compute hash of crate {}", _0)]
-    GuixHashError(
-        #[error(cause)] shellfn::Error<std::convert::Infallible>,
-        String,
-    ),
-    #[error(display = "could not copy crate {} source to destination", _0)]
-    CopyError(#[error(cause)] std::io::Error, String),
-    #[error(display = "no version of crate {} matching {} found", name, version)]
-    NoMatchingVersion { name: String, version: String },
-    #[error(
-        display = "no version of crate {} matching requirement {} found",
-        name,
-        requirement
-    )]
-    NoVersionMatchingRequirement { name: String, requirement: String },
-    #[error(display = "parsing of version {} for crate {} failed", _1, _1)]
-    VersionParsingError(#[error(cause)] semver::SemVerError, String, String),
-    #[error(display = "parsing of requirement {} for crate {} failed", _1, _0)]
-    RequirementParsingError(#[error(cause)] semver::ReqParseError, String, String),
-    #[error(
-        display = "could not process a dependency of crate {} in version {}",
-        _0,
-        _1
-    )]
-    DependencyProcessingFailed(#[error(cause)] Box<CarguixError>, String, String),
-}
-
 #[derive(Debug)]
 pub struct Carguix {
     crates: VecDeque<(String, Option<String>)>,
     already_added_crates: HashSet<(String, Option<String>)>,
     index: Index,
     tmpdir: TempDir,
-    hashdb: Database<(String, String)>,
+    hashdb: Database<CrateRef_>,
 }
 
 impl Carguix {
@@ -132,7 +84,7 @@ impl Carguix {
             })?;
         for dependency in &crate_package.dependencies {
             self.crates
-                .push_back((dependency.name.clone(), Some(dependency.version.clone())));
+                .push_back(dependency);
         }
         self.already_added_crates
             .insert((crate_name.to_string(), crate_version.clone()));
@@ -141,31 +93,17 @@ impl Carguix {
 
     pub fn get_crate_hash(
         &mut self,
-        crate_name: &str,
-        version: &str,
+        crate_ref: &CrateRef_,
     ) -> Result<String, CarguixError> {
-        let key = &(crate_name.to_string(), version.to_string());
+        let key = crate_ref;
         match self.hashdb.retrieve::<String, _>(key) {
             Ok(hash) => return Ok(hash),
             Err(rustbreak::BreakError::NotFound) => (), // cache miss
             Err(err) => Err(CarguixError::HashRetrieveFailed(err, key.clone()))?,
         }
-        let url = format!(
-            "https://crates.io/api/v1/crates/{}/{}/download",
-            crate_name, version
-        );
-        let mut download_request = reqwest::get(&url)
-            .map_err(|err| CarguixError::CrateDownloadError(err, crate_name.to_string()))?;
-        let downloaded_crate_path = self
-            .tmpdir
-            .path()
-            .join(format!("{}-{}.tar.gz", crate_name, version));
-        let mut downloaded_crate = File::create(downloaded_crate_path.clone())
-            .map_err(|err| CarguixError::FileCreationFailed(err, crate_name.to_string()))?;
-        copy(&mut download_request, &mut downloaded_crate)
-            .map_err(|err| CarguixError::CopyError(err, crate_name.to_string()))?;
-        let hash = Self::guix_hash(&downloaded_crate_path.to_string_lossy())
-            .map_err(|err| CarguixError::GuixHashError(err, crate_name.to_string()))?;
+
+        let hash = crate_ref.get_hash(self.tmpdir.path())?;
+
         self.hashdb
             .insert(key, hash.clone())
             .map_err(|err| CarguixError::HashInsertionFailed(err, key.clone()))?;
@@ -212,7 +150,9 @@ impl Carguix {
                     version.to_string(),
                 )
             })?;
-        let hash = self.get_crate_hash(crate_.name(), version)?;
+
+        let crate_ref = CrateRef_::official_registry(crate_.name(), version);
+        let hash = self.get_crate_hash(&crate_ref)?;
         Ok(CratePackage::new(
             crate_.name(),
             version,
@@ -283,15 +223,15 @@ impl Iterator for Carguix {
 
 #[derive(Debug, Clone)]
 pub struct CratePackage {
-    pub crate_ref: CrateRef,
+    pub crate_ref: CrateRef_,
     pub hash: String,
-    pub dependencies: Vec<CrateRef>,
+    pub dependencies: Vec<CrateRef_>,
 }
 
 impl CratePackage {
-    pub fn new(name: &str, version: &str, hash: &str, dependencies: &[CrateRef]) -> Self {
+    pub fn new(crate_ref: &CrateRef_, hash: &str, dependencies: &[CrateRef_]) -> Self {
         Self {
-            crate_ref: CrateRef::new(name, version),
+            crate_ref: crate_ref.clone(),
             hash: hash.to_string(),
             dependencies: dependencies.to_vec(),
         }
@@ -301,7 +241,7 @@ impl CratePackage {
         let dependencies_sexpr = self
             .dependencies
             .iter()
-            .map(CrateRef::to_dependency_sexpr)
+            .map(CrateRef_::to_dependency_sexpr)
             .collect::<Vec<_>>();
         sexp!(
             (#"define-public" ,(lexpr::Value::symbol(self.crate_ref.format_name_version()))
@@ -328,6 +268,59 @@ impl CratePackage {
                     (license #f)))
         )
     }
+}
+
+#[derive(Debug, Clone, Hash, Eq, PartialEq,Deserialize,Serialize)]
+pub enum CrateRef_ {
+    OfficialRegistry(CrateOfficialRegistryRef),
+    Path(CratePathRef),
+    Git(CrateGitRef),
+}
+
+impl CrateRef_ {
+    pub fn official_registry(name: &str, version: &str) -> Self {
+        Self::OfficialRegistry(CrateOfficialRegistryRef { name: name.to_string(), version: version.to_string()})
+    }
+
+    fn get_hash(&self, path: &Path) -> Result<String, CarguixError> {
+        match self {
+            CrateRef_::OfficialRegistry(crate_ref) => {
+                let url = format!(
+                    "https://crates.io/api/v1/crates/{}/{}/download",
+                    crate_ref.name, crate_ref.version
+                );
+                let mut download_request = reqwest::get(&url)
+                    .map_err(|err| CarguixError::CrateDownloadError(err, crate_ref.name.to_string()))?;
+                let downloaded_crate_path = path
+                    .join(format!("{}-{}.tar.gz", crate_ref.name, crate_ref.version));
+                let mut downloaded_crate = File::create(downloaded_crate_path.clone())
+                    .map_err(|err| CarguixError::FileCreationFailed(err, crate_ref.name.to_string()))?;
+                copy(&mut download_request, &mut downloaded_crate)
+                    .map_err(|err| CarguixError::CopyError(err, crate_ref.name.to_string()))?;
+                Carguix::guix_hash(&downloaded_crate_path.to_string_lossy())
+                    .map_err(|err| CarguixError::GuixHashError(err, crate_ref.name.to_string()))
+            }
+            _ => unimplemented!(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Hash, Eq, PartialEq,Deserialize,Serialize)]
+pub struct CrateOfficialRegistryRef {
+    pub name: String,
+    pub version: String,
+}
+
+#[derive(Debug, Clone, Hash, Eq, PartialEq,Deserialize,Serialize)]
+pub struct CratePathRef {
+    pub name: String,
+    pub version: String,
+}
+
+#[derive(Debug, Clone, Hash, Eq, PartialEq,Deserialize,Serialize)]
+pub struct CrateGitRef {
+    pub name: String,
+    pub version: String,
 }
 
 #[derive(Debug, Clone)]
@@ -385,4 +378,11 @@ fn print_error(err: &dyn Error) {
         log::error!("caused by: {}", err);
         cause = err.source();
     }
+}
+
+#[test]
+fn test_cargo_toml() {
+    dbg!(cargo_toml::Manifest::from_path(
+        "/home/sisyphe/Projects/easymov/products/sultan/src/carguix/Cargo.toml",
+    ));
 }
