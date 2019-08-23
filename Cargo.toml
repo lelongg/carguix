@@ -6,7 +6,6 @@ edition = "2018"
 
 [dependencies]
 cargo_toml = "0.7.1"
-quicli = "0.4.0"
 structopt = "0.2.18"
 lexpr = "0.2.3"
 crates-index = "0.13.2"
@@ -19,3 +18,4 @@ once_cell = "0.2.6"
 reqwest = "0.9.20"
 env_logger = "0.6.2"
 rustbreak = "1.4.0"
+err-derive = "0.1.5"
