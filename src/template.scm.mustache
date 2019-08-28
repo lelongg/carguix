@@ -1,0 +1,31 @@
+(define-module
+  (easymov packages {{name}})
+  #:use-module ((guix licenses) #:prefix license:)
+  #:use-module (gnu packages)
+  #:use-module (guix packages)
+  #:use-module (guix download)
+  #:use-module (guix utils)
+  #:use-module (guix build-system cargo))
+
+{{#packages}}
+(define-public {{package_name}}
+  (package
+    (name "{{name}}")
+    (version "{{version}}")
+    (source
+      (origin
+        (method url-fetch)
+        (uri "{{source}}")
+        (sha256
+          (base32
+            "{{hash}}"))))
+    (build-system {{build_system}})
+    (arguments
+      `(#:cargo-inputs ({{#cargo_inputs}}
+        ("{{.}}" ,{{.}}){{/cargo_inputs}})))
+    {{#home_page}}(home-page "{{home_page}}"){{/home_page}}{{^home_page}}(home-page #f){{/home_page}}
+    {{#synopsis}}(synopsis "{{synopsis}}"){{/synopsis}}{{^synopsis}}(synopsis #f){{/synopsis}}
+    {{#description}}(description "{{description}}"){{/description}}{{^description}}(description #f){{/description}}
+    {{#license}}(license {{license}}){{/license}}{{^license}}(license #f){{/license}}))
+
+{{/packages}}
