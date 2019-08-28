@@ -1,8 +1,4 @@
-use crate::{
-    crate_ref::{CrateRef, CrateSource},
-    errors::CarguixError,
-    guix, INDEX,
-};
+use crate::{crate_ref::CrateRef, errors::CarguixError, guix, INDEX};
 use crates_index::{Dependency as CrateDependency, Version as CrateVersion};
 use heck::KebabCase;
 use semver::{Version, VersionReq};
@@ -46,47 +42,7 @@ impl RegistrySource {
         })
     }
 
-    pub fn crate_name(&self) -> String {
-        self.crate_version.name().to_string()
-    }
-
-    pub fn package_name(&self) -> String {
-        format!(
-            "{}-{}",
-            self.crate_name().to_kebab_case(),
-            self.crate_version.version()
-        )
-    }
-
-    pub fn version(&self) -> String {
-        self.crate_version.version().to_string()
-    }
-
-    pub fn source(&self) -> String {
-        format!(
-            "https://crates.io/api/v1/crates/{}/{}/download",
-            self.crate_version.name(),
-            self.version()
-        )
-    }
-
-    pub fn dependencies(&self) -> Result<Vec<CrateRef>, CarguixError> {
-        self.crate_version
-            .dependencies()
-            .iter()
-            .map(|dependency| {
-                RegistrySource::new_with_requirement(
-                    dependency.crate_name(),
-                    dependency.requirement(),
-                )
-                .map(|source| {
-                    CrateRef::new(dependency.crate_name(), &CrateSource::Registry(source))
-                })
-            })
-            .collect::<Result<Vec<_>, _>>()
-    }
-
-    fn highest_matching_crate_version(
+    pub fn highest_matching_crate_version(
         crate_name: &str,
         requirement: &str,
     ) -> Result<CrateVersion, CarguixError> {
@@ -125,5 +81,44 @@ impl RegistrySource {
                 name: crate_name.to_string(),
                 requirement: requirement.to_string(),
             })
+    }
+}
+
+impl CrateRef for RegistrySource {
+    fn crate_name(&self) -> String {
+        self.crate_version.name().to_string()
+    }
+
+    fn package_name(&self) -> String {
+        format!(
+            "{}-{}",
+            self.crate_name().to_kebab_case(),
+            self.crate_version.version()
+        )
+    }
+
+    fn version(&self) -> String {
+        self.crate_version.version().to_string()
+    }
+
+    fn source(&self) -> String {
+        format!(
+            "https://crates.io/api/v1/crates/{}/{}/download",
+            self.crate_version.name(),
+            self.version()
+        )
+    }
+
+    fn dependencies(&self) -> Result<Vec<Box<dyn CrateRef>>, CarguixError> {
+        self.crate_version
+            .dependencies()
+            .iter()
+            .map(|dependency| {
+                Ok(Box::new(RegistrySource::new_with_requirement(
+                    dependency.crate_name(),
+                    dependency.requirement(),
+                )?) as Box<dyn CrateRef>)
+            })
+            .collect::<Result<Vec<_>, _>>()
     }
 }

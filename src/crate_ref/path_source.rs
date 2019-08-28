@@ -1,8 +1,7 @@
 use crate::{
-    crate_ref::{registry_source::RegistrySource, CrateRef, CrateSource},
+    crate_ref::{registry_source::RegistrySource, CrateRef},
     errors::CarguixError,
-    guix::{self, ToGuixPackage},
-    INDEX,
+    guix, INDEX,
 };
 use crates_index::{Dependency as CrateDependency, Version as CrateVersion};
 use heck::KebabCase;
@@ -36,12 +35,14 @@ impl PathSource {
             manifest,
         })
     }
+}
 
-    pub fn crate_name(&self) -> String {
+impl CrateRef for PathSource {
+    fn crate_name(&self) -> String {
         self.package.name.clone()
     }
 
-    pub fn package_name(&self) -> String {
+    fn package_name(&self) -> String {
         format!(
             "{}-{}",
             self.crate_name().to_kebab_case(),
@@ -49,11 +50,11 @@ impl PathSource {
         )
     }
 
-    pub fn version(&self) -> String {
+    fn version(&self) -> String {
         self.package.version.clone()
     }
 
-    pub fn source(&self) -> String {
+    fn source(&self) -> String {
         format!(
             "file://{}",
             canonicalize(&self.path)
@@ -64,24 +65,22 @@ impl PathSource {
         )
     }
 
-    pub fn dependencies(&self) -> Result<Vec<CrateRef>, CarguixError> {
+    fn dependencies(&self) -> Result<Vec<Box<dyn CrateRef>>, CarguixError> {
         self.manifest
             .dependencies
             .iter()
             .chain(self.manifest.build_dependencies.iter())
             .map(|(name, dependency)| {
-                let crate_name = dependency.package().unwrap_or(name);
-                let source = if dependency.is_crates_io() {
-                    CrateSource::Registry(RegistrySource::new_with_requirement(
-                        crate_name,
+                Ok(Box::new(if dependency.is_crates_io() {
+                    RegistrySource::new_with_requirement(
+                        dependency.package().unwrap_or(name),
                         dependency.req(),
-                    )?)
+                    )?
                 } else if dependency.git().is_some() {
                     unimplemented!()
                 } else {
                     unimplemented!()
-                };
-                Ok(CrateRef::new(crate_name, &source))
+                }) as Box<dyn CrateRef>)
             })
             .collect()
     }

@@ -1,13 +1,12 @@
-#![allow(dead_code, unused_imports)]
+#![allow(dead_code)]
 
 mod crate_ref;
 mod errors;
 mod guix;
 
-use crate_ref::{parse_lock, CrateRef};
+use crate_ref::{CrateRef, LockSource};
 use crates_index::{Crate as IndexedCrate, Dependency as CrateDependency, Index as CrateIndex};
 use errors::CarguixError;
-use guix::ToGuixPackage;
 use once_cell::sync::Lazy;
 use rustbreak::Database;
 use std::{
@@ -63,9 +62,12 @@ fn run() -> Result<String, CarguixError> {
     let mut crates_queue = VecDeque::new();
     let mut guix_packages = HashMap::new();
     if let Some(crate_name) = args.crate_name {
-        // crates_queue.push_back(CrateRef::registry(&crate_name, &args.version)?);
         if let Some(manifest_path) = args.manifest_path {
-            crates_queue.push_back(CrateRef::lock(&crate_name, &args.version, manifest_path)?);
+            crates_queue.push_back(Box::new(LockSource::new(
+                &crate_name,
+                &args.version,
+                manifest_path,
+            )?) as Box<dyn CrateRef>);
         }
     }
     while let Some(crate_ref) = crates_queue.pop_front() {

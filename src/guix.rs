@@ -36,13 +36,6 @@ pub struct Package {
     pub cargo_inputs: Vec<String>,
 }
 
-pub trait ToGuixPackage
-where
-    Self: Sized,
-{
-    fn to_guix_package(&self) -> Result<(Package, Vec<Self>), CarguixError>;
-}
-
 pub fn hash(url_str: &str) -> Result<String, CarguixError> {
     match HASHDB.retrieve::<String, _>(url_str) {
         Ok(hash) => return Ok(hash),

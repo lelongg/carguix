@@ -1,8 +1,7 @@
 use crate::{
-    crate_ref::{registry_source::RegistrySource, CrateRef, CrateSource},
+    crate_ref::{registry_source::RegistrySource, CrateRef},
     errors::CarguixError,
-    guix::{self, ToGuixPackage},
-    INDEX,
+    guix, INDEX,
 };
 use crates_index::{Dependency as CrateDependency, Version as CrateVersion};
 use heck::KebabCase;
@@ -18,24 +17,24 @@ use std::{
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GitSource {}
 
-impl GitSource {
-    pub fn crate_name(&self) -> String {
+impl CrateRef for GitSource {
+    fn crate_name(&self) -> String {
         unimplemented!()
     }
 
-    pub fn package_name(&self) -> String {
+    fn package_name(&self) -> String {
         unimplemented!()
     }
 
-    pub fn version(&self) -> String {
+    fn version(&self) -> String {
         unimplemented!()
     }
 
-    pub fn source(&self) -> String {
+    fn source(&self) -> String {
         unimplemented!()
     }
 
-    pub fn dependencies(&self) -> Result<Vec<CrateRef>, CarguixError> {
+    fn dependencies(&self) -> Result<Vec<Box<dyn CrateRef>>, CarguixError> {
         unimplemented!()
     }
 }
