@@ -45,10 +45,10 @@ impl RegistrySource {
         crate_name: &str,
         requirement: &str,
     ) -> Result<CrateVersion, CarguixError> {
-        let crate_ = INDEX
+        let indexed_crate = INDEX
             .crate_(crate_name)
             .ok_or_else(|| CarguixError::CrateNotFound(crate_name.to_string()))?;
-        let mut crate_versions = crate_
+        let mut crate_versions = indexed_crate
             .versions()
             .iter()
             .map(|crate_version| {
@@ -118,6 +118,6 @@ impl CrateRef for RegistrySource {
                     dependency.requirement(),
                 )?) as Box<dyn CrateRef>)
             })
-            .collect::<Result<Vec<_>, _>>()
+            .collect()
     }
 }

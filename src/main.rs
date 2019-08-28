@@ -4,7 +4,7 @@ mod crate_ref;
 mod errors;
 mod guix;
 
-use crate_ref::{CrateRef, LockSource};
+use crate_ref::{CrateRef, PathSource};
 use crates_index::Index as CrateIndex;
 use errors::CarguixError;
 use once_cell::sync::Lazy;
@@ -65,13 +65,9 @@ fn run() -> Result<String, CarguixError> {
     }
     let mut crates_queue = VecDeque::new();
     let mut guix_packages = HashMap::new();
-    if let Some(crate_name) = args.crate_name {
+    if let Some(_crate_name) = &args.crate_name {
         if let Some(manifest_path) = args.manifest_path {
-            crates_queue.push_back(Box::new(LockSource::new(
-                &crate_name,
-                &args.version,
-                manifest_path,
-            )?) as Box<dyn CrateRef>);
+            crates_queue.push_back(Box::new(PathSource::new(manifest_path)?) as Box<dyn CrateRef>);
         }
     }
     while let Some(crate_ref) = crates_queue.pop_front() {
@@ -93,6 +89,7 @@ fn run() -> Result<String, CarguixError> {
     mustache::compile_str(include_str!("template.scm.mustache"))
         .map_err(CarguixError::TemplateCompilationFailed)?
         .render_to_string(&guix::Module {
+            name: args.crate_name.unwrap_or_else(|| "".to_string()),
             packages: guix_packages.values().cloned().collect(),
         })
         .map_err(CarguixError::RenderError)

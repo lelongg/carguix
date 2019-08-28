@@ -70,4 +70,6 @@ pub enum CarguixError {
     LockFileReadError(#[error(cause)] std::io::Error),
     #[error(display = "cannot parse Cargo.lock")]
     LockFileParsingError(#[error(cause)] toml::de::Error),
+    #[error(display = "cannot canonicalize path: {}", _0)]
+    CanonicalizationFailed(#[error(cause)] std::io::Error, String),
 }

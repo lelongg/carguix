@@ -7,6 +7,7 @@ use std::{convert::Infallible, fs::File, io::copy, path::Path};
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Module {
+    pub name: String,
     pub packages: Vec<Package>,
 }
 
@@ -38,10 +39,9 @@ pub struct Package {
 pub fn hash(url_str: &str) -> Result<String, CarguixError> {
     match HASHDB.retrieve::<String, _>(url_str) {
         Ok(hash) => return Ok(hash),
-        Err(rustbreak::BreakError::NotFound) => log::warn!("cache miss"), // cache miss
+        Err(rustbreak::BreakError::NotFound) => log::debug!("cache miss on {}", url_str),
         Err(err) => Err(CarguixError::HashRetrieveFailed(err, url_str.to_string()))?,
     }
-
     let url = reqwest::Url::parse(url_str)
         .map_err(|err| CarguixError::UrlParsingError(err, url_str.to_string()))?;
     let downloaded_crate_path = if url.scheme() == "file" {
@@ -62,7 +62,6 @@ pub fn hash(url_str: &str) -> Result<String, CarguixError> {
             .map_err(|err| CarguixError::CopyError(err, url_str.to_string()))?;
         downloaded_crate_path
     };
-
     let hash = guix_hash(&downloaded_crate_path.to_string_lossy())
         .map_err(|err| CarguixError::GuixHashError(err, url_str.to_string()))?;
     HASHDB

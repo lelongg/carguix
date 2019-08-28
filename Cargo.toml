@@ -7,7 +7,6 @@ edition = "2018"
 [dependencies]
 cargo_toml = "0.8.0"
 structopt = "0.2.18"
-lexpr = "0.2.3"
 crates-index = "0.13.2"
 semver = "0.9.0"
 log = "0.4.8"

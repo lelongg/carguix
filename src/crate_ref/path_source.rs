@@ -1,11 +1,11 @@
 use crate::{
-    crate_ref::{registry_source::RegistrySource, CrateRef},
+    crate_ref::{lock_source::LockSource, CrateRef},
     errors::CarguixError,
 };
 use heck::KebabCase;
 use serde::{Deserialize, Serialize};
 use std::{
-    fs::canonicalize,
+    collections::HashMap,
     path::{Path, PathBuf},
 };
 
@@ -14,21 +14,71 @@ pub struct PathSource {
     path: PathBuf,
     package: cargo_toml::Package,
     manifest: cargo_toml::Manifest,
+    lock_source: Option<LockSource>,
+    crate_paths: HashMap<String, PathBuf>,
 }
 
 impl PathSource {
     pub fn new(path: impl AsRef<Path>) -> Result<Self, CarguixError> {
-        let path = path.as_ref();
-        let manifest = cargo_toml::Manifest::from_path(path).map_err(|err| {
-            CarguixError::ManifestParsingError(err, path.to_string_lossy().to_string())
+        let path = path.as_ref().canonicalize().map_err(|err| {
+            CarguixError::CanonicalizationFailed(err, path.as_ref().to_string_lossy().to_string())
         })?;
+        let mut cargo_toml_path = path.to_path_buf();
+        cargo_toml_path.push("Cargo.toml");
+        let manifest = cargo_toml::Manifest::from_path(cargo_toml_path.clone()).map_err(|err| {
+            CarguixError::ManifestParsingError(err, cargo_toml_path.to_string_lossy().to_string())
+        })?;
+        Self::new_with_manifest(path, &manifest)
+    }
+
+    pub fn new_with_manifest(
+        path: impl AsRef<Path>,
+        manifest: &cargo_toml::Manifest,
+    ) -> Result<Self, CarguixError> {
+        let path = path.as_ref();
+        let package = manifest
+            .package
+            .clone()
+            .ok_or_else(|| CarguixError::NoPackageInManifest(path.to_string_lossy().to_string()))?;
+        let lock_source = Self::find_cargo_lock(path)
+            .map(|lockfile_path| LockSource::new(&package.name, &None, lockfile_path))
+            .transpose()?;
+        let crate_paths = manifest
+            .dependencies
+            .iter()
+            .chain(manifest.build_dependencies.iter())
+            .filter_map(|(name, dependency)| {
+                dependency
+                    .detail()
+                    .and_then(|detail| detail.path.as_ref())
+                    .map(|crate_path| {
+                        (name.clone(), [path, Path::new(crate_path)].iter().collect())
+                    })
+            })
+            .collect();
         Ok(Self {
             path: path.to_path_buf(),
-            package: manifest.package.clone().ok_or_else(|| {
-                CarguixError::NoPackageInManifest(path.to_string_lossy().to_string())
-            })?,
-            manifest,
+            package,
+            manifest: manifest.clone(),
+            lock_source,
+            crate_paths,
         })
+    }
+
+    pub fn find_cargo_lock(path: impl AsRef<Path>) -> Option<PathBuf> {
+        let mut current = path.as_ref().to_path_buf();
+        loop {
+            log::debug!("looking for Cargo.lock in {:?}", current);
+            current.push("Cargo.lock");
+            if std::fs::metadata(&current).is_ok() {
+                log::debug!("Cargo.lock found at {:?}", current);
+                return Some(current);
+            }
+            current.pop();
+            if !current.pop() {
+                return None;
+            }
+        }
     }
 }
 
@@ -50,33 +100,35 @@ impl CrateRef for PathSource {
     }
 
     fn source(&self) -> String {
-        format!(
-            "file://{}",
-            canonicalize(&self.path)
-                .expect("cannot canonicalize path")
-                .parent()
-                .expect("not a file path")
-                .to_string_lossy()
-        )
+        format!("file://{}", self.path.to_string_lossy())
     }
 
     fn dependencies(&self) -> Result<Vec<Box<dyn CrateRef>>, CarguixError> {
-        self.manifest
-            .dependencies
-            .iter()
-            .chain(self.manifest.build_dependencies.iter())
-            .map(|(name, dependency)| {
-                Ok(Box::new(if dependency.is_crates_io() {
-                    RegistrySource::new_with_requirement(
-                        dependency.package().unwrap_or(name),
-                        dependency.req(),
-                    )?
-                } else if dependency.git().is_some() {
-                    unimplemented!()
-                } else {
-                    unimplemented!()
-                }) as Box<dyn CrateRef>)
-            })
-            .collect()
+        if let Some(lock_source) = &self.lock_source {
+            lock_source
+                .package
+                .dependencies
+                .iter()
+                .map(|dependency| {
+                    let dependency_split = dependency.split(' ').collect::<Vec<_>>();
+                    Ok(match &*dependency_split {
+                        [crate_name, version, _] => Box::new(LockSource::new_with_manifest(
+                            crate_name,
+                            &Some(version.to_string()),
+                            lock_source.manifest.clone(),
+                        )?)
+                            as Box<dyn CrateRef>,
+                        [crate_name, _] => Box::new(PathSource::new(
+                            self.crate_paths
+                                .get(&crate_name.to_string())
+                                .expect("dependency path not found"),
+                        )?) as Box<dyn CrateRef>,
+                        _ => Err(CarguixError::BadLockFileDependency(dependency.to_string()))?,
+                    })
+                })
+                .collect()
+        } else {
+            unimplemented!()
+        }
     }
 }

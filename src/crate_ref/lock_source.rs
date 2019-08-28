@@ -8,21 +8,28 @@ pub struct CargoLock {
     package: Vec<CargoLockPackage>,
 }
 
+impl CargoLock {
+    pub fn from_path(path: impl AsRef<Path>) -> Result<Self, CarguixError> {
+        toml::from_str(&std::fs::read_to_string(path).map_err(CarguixError::LockFileReadError)?)
+            .map_err(CarguixError::LockFileParsingError)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CargoLockPackage {
-    name: String,
-    version: String,
-    source: Option<String>,
+    pub name: String,
+    pub version: String,
+    pub source: Option<String>,
     #[serde(default)]
-    dependencies: Vec<String>,
+    pub dependencies: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LockSource {
-    crate_name: String,
-    version: String,
-    package: CargoLockPackage,
-    manifest: Box<CargoLock>,
+    pub crate_name: String,
+    pub version: String,
+    pub package: CargoLockPackage,
+    pub manifest: Box<CargoLock>,
 }
 
 impl LockSource {
@@ -31,11 +38,7 @@ impl LockSource {
         version: &Option<String>,
         path: impl AsRef<Path>,
     ) -> Result<Self, CarguixError> {
-        let cargo_lock: CargoLock = toml::from_str(
-            &std::fs::read_to_string(path).map_err(CarguixError::LockFileReadError)?,
-        )
-        .map_err(CarguixError::LockFileParsingError)?;
-        LockSource::new_with_manifest(crate_name, version, Box::new(cargo_lock))
+        LockSource::new_with_manifest(crate_name, version, Box::new(CargoLock::from_path(path)?))
     }
 
     pub fn new_with_manifest(
