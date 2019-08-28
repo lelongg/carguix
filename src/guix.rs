@@ -3,8 +3,7 @@ use data_encoding::BASE64URL_NOPAD;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use shellfn::shell;
-use std::collections::hash_map::DefaultHasher;
-use std::{convert::Infallible, fs::File, hash::Hash, io::copy, path::Path};
+use std::{convert::Infallible, fs::File, io::copy, path::Path};
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Module {

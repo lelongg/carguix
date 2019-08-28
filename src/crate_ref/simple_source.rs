@@ -1,14 +1,6 @@
-use crate::{crate_ref::lock_source::CargoLock, errors::CarguixError, guix, CrateRef, INDEX};
-use crates_index::{Dependency as CrateDependency, Version as CrateVersion};
+use crate::{errors::CarguixError, CrateRef};
 use heck::KebabCase;
-use semver::{Version, VersionReq};
 use serde::{Deserialize, Serialize};
-use std::{
-    convert::TryFrom,
-    error::Error,
-    fs::canonicalize,
-    path::{Path, PathBuf},
-};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SimpleSource {

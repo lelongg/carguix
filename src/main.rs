@@ -5,15 +5,13 @@ mod errors;
 mod guix;
 
 use crate_ref::{CrateRef, LockSource};
-use crates_index::{Crate as IndexedCrate, Dependency as CrateDependency, Index as CrateIndex};
+use crates_index::Index as CrateIndex;
 use errors::CarguixError;
 use once_cell::sync::Lazy;
 use rustbreak::Database;
 use std::{
     collections::{HashMap, VecDeque},
-    convert::TryFrom,
     error::Error,
-    io::Cursor,
     ops::Not,
     path::PathBuf,
 };
@@ -37,16 +35,22 @@ struct Cli {
 }
 
 type HashDbKey = String;
-static TMPDIR: Lazy<TempDir> =
-    Lazy::new(|| TempDir::new("carguix").expect("cannot create temporary directory"));
+static TMPDIR: Lazy<TempDir> = Lazy::new(|| {
+    TempDir::new("carguix")
+        .map_err(CarguixError::TmpdirError)
+        .unwrap_or_else(|err| exit_with_errors(&err))
+});
 static INDEX: Lazy<CrateIndex> = Lazy::new(|| CrateIndex::new("_index"));
-static HASHDB: Lazy<Database<HashDbKey>> =
-    Lazy::new(|| Database::open("hash.db").expect("cannot create hash.db"));
+static HASHDB: Lazy<Database<HashDbKey>> = Lazy::new(|| {
+    Database::open("hash.db")
+        .map_err(CarguixError::HashdbError)
+        .unwrap_or_else(|err| exit_with_errors(&err))
+});
 
 fn main() {
     match run() {
         Ok(result) => print!("{}", result),
-        Err(err) => print_error(&err),
+        Err(err) => exit_with_errors(&err),
     }
 }
 
@@ -94,11 +98,12 @@ fn run() -> Result<String, CarguixError> {
         .map_err(CarguixError::RenderError)
 }
 
-fn print_error(err: &dyn Error) {
+fn exit_with_errors(err: &dyn Error) -> ! {
     log::error!("error: {}", err);
     let mut cause = err.source();
     while let Some(err) = cause {
         log::error!("caused by: {}", err);
         cause = err.source();
     }
+    std::process::exit(1)
 }

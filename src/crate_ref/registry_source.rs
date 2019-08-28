@@ -1,9 +1,8 @@
-use crate::{crate_ref::CrateRef, errors::CarguixError, guix, INDEX};
-use crates_index::{Dependency as CrateDependency, Version as CrateVersion};
+use crate::{crate_ref::CrateRef, errors::CarguixError, INDEX};
+use crates_index::Version as CrateVersion;
 use heck::KebabCase;
 use semver::{Version, VersionReq};
 use serde::{Deserialize, Serialize};
-use std::{convert::TryFrom, error::Error};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RegistrySource {

@@ -1,19 +1,7 @@
-use crate::{
-    crate_ref::{CrateRef, RegistrySource, SimpleSource},
-    errors::CarguixError,
-    guix, INDEX,
-};
-use crates_index::{Dependency as CrateDependency, Version as CrateVersion};
+use crate::{crate_ref::CrateRef, errors::CarguixError};
 use heck::KebabCase;
-use semver::{Version, VersionReq};
 use serde::{Deserialize, Serialize};
-use std::{
-    collections::BTreeMap,
-    convert::TryFrom,
-    error::Error,
-    fs::canonicalize,
-    path::{Path, PathBuf},
-};
+use std::path::Path;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CargoLock {
