@@ -19,7 +19,10 @@ pub struct PathSource {
 }
 
 impl PathSource {
-    pub fn new(path: impl AsRef<Path>) -> Result<Self, CarguixError> {
+    pub fn new(
+        path: impl AsRef<Path>,
+        crate_paths: &HashMap<String, PathBuf>,
+    ) -> Result<Self, CarguixError> {
         let path = path.as_ref().canonicalize().map_err(|err| {
             CarguixError::CanonicalizationFailed(err, path.as_ref().to_string_lossy().to_string())
         })?;
@@ -28,12 +31,13 @@ impl PathSource {
         let manifest = cargo_toml::Manifest::from_path(cargo_toml_path.clone()).map_err(|err| {
             CarguixError::ManifestParsingError(err, cargo_toml_path.to_string_lossy().to_string())
         })?;
-        Self::new_with_manifest(path, &manifest)
+        Self::new_with_manifest(path, &manifest, crate_paths)
     }
 
     pub fn new_with_manifest(
         path: impl AsRef<Path>,
         manifest: &cargo_toml::Manifest,
+        crate_paths: &HashMap<String, PathBuf>,
     ) -> Result<Self, CarguixError> {
         let path = path.as_ref();
         let package = manifest
@@ -43,25 +47,40 @@ impl PathSource {
         let lock_source = Self::find_cargo_lock(path)
             .map(|lockfile_path| LockSource::new(&package.name, &None, lockfile_path))
             .transpose()?;
-        let crate_paths = manifest
-            .dependencies
-            .iter()
-            .chain(manifest.build_dependencies.iter())
-            .filter_map(|(name, dependency)| {
-                dependency
-                    .detail()
-                    .and_then(|detail| detail.path.as_ref())
-                    .map(|crate_path| {
-                        (name.clone(), [path, Path::new(crate_path)].iter().collect())
-                    })
-            })
-            .collect();
+        let mut crate_paths = crate_paths.clone();
+        crate_paths.extend(
+            manifest
+                .dependencies
+                .iter()
+                .chain(manifest.build_dependencies.iter())
+                .chain(manifest.target.iter().flat_map(|(_, target)| {
+                    target
+                        .dependencies
+                        .iter()
+                        .chain(target.build_dependencies.iter())
+                }))
+                .chain(
+                    manifest
+                        .patch
+                        .values()
+                        .flat_map(|dependencies| dependencies.iter()),
+                )
+                .filter_map(|(name, dependency)| {
+                    dbg!(name);
+                    dependency
+                        .detail()
+                        .and_then(|detail| detail.path.as_ref())
+                        .map(|crate_path| {
+                            (name.clone(), [path, Path::new(crate_path)].iter().collect())
+                        })
+                }),
+        );
         Ok(Self {
             path: path.to_path_buf(),
             package,
             manifest: manifest.clone(),
             lock_source,
-            crate_paths,
+            crate_paths: dbg!(crate_paths),
         })
     }
 
@@ -116,12 +135,21 @@ impl CrateRef for PathSource {
                             crate_name,
                             &Some(version.to_string()),
                             lock_source.manifest.clone(),
+                            &self.crate_paths,
                         )?)
                             as Box<dyn CrateRef>,
                         [crate_name, _] => Box::new(PathSource::new(
                             self.crate_paths
                                 .get(&crate_name.to_string())
-                                .expect("dependency path not found"),
+                                .unwrap_or_else(|| {
+                                    panic!(
+                                        "dependency {} of {} path not found in {:?}",
+                                        crate_name,
+                                        self.crate_name(),
+                                        self.crate_paths,
+                                    )
+                                }),
+                            &self.crate_paths,
                         )?) as Box<dyn CrateRef>,
                         _ => Err(CarguixError::BadLockFileDependency(dependency.to_string()))?,
                     })

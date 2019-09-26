@@ -22,7 +22,7 @@ use tempdir::TempDir;
 #[structopt(about = "Generate Guix package definition for Rust crates")]
 struct Cli {
     crate_name: Option<String>,
-    #[structopt(short, long, help = "Path to Cargo.lock")]
+    #[structopt(short, long, help = "Path to crate directory (containing Cargo.toml)")]
     manifest_path: Option<PathBuf>,
     #[structopt(short, long, help = "Update crates.io index")]
     update: bool,
@@ -67,7 +67,9 @@ fn run() -> Result<String, CarguixError> {
     let mut guix_packages = HashMap::new();
     if let Some(_crate_name) = &args.crate_name {
         if let Some(manifest_path) = args.manifest_path {
-            crates_queue.push_back(Box::new(PathSource::new(manifest_path)?) as Box<dyn CrateRef>);
+            crates_queue.push_back(
+                Box::new(PathSource::new(manifest_path, &HashMap::new())?) as Box<dyn CrateRef>
+            );
         }
     }
     while let Some(crate_ref) = crates_queue.pop_front() {

@@ -1,7 +1,13 @@
-use crate::{crate_ref::CrateRef, errors::CarguixError};
+use crate::{
+    crate_ref::{CrateRef, PathSource},
+    errors::CarguixError,
+};
 use heck::KebabCase;
 use serde::{Deserialize, Serialize};
-use std::path::Path;
+use std::{
+    collections::HashMap,
+    path::{Path, PathBuf},
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CargoLock {
@@ -30,6 +36,7 @@ pub struct LockSource {
     pub version: String,
     pub package: CargoLockPackage,
     pub manifest: Box<CargoLock>,
+    pub crate_paths: HashMap<String, PathBuf>,
 }
 
 impl LockSource {
@@ -38,13 +45,19 @@ impl LockSource {
         version: &Option<String>,
         path: impl AsRef<Path>,
     ) -> Result<Self, CarguixError> {
-        LockSource::new_with_manifest(crate_name, version, Box::new(CargoLock::from_path(path)?))
+        LockSource::new_with_manifest(
+            crate_name,
+            version,
+            Box::new(CargoLock::from_path(path)?),
+            &HashMap::new(),
+        )
     }
 
     pub fn new_with_manifest(
         crate_name: &str,
         version: &Option<String>,
         manifest: Box<CargoLock>,
+        crate_paths: &HashMap<String, PathBuf>,
     ) -> Result<Self, CarguixError> {
         let package = manifest
             .package
@@ -71,6 +84,7 @@ impl LockSource {
             version: package.version.to_string(),
             package,
             manifest,
+            crate_paths: crate_paths.clone(),
         })
     }
 }
@@ -111,15 +125,28 @@ impl CrateRef for LockSource {
             .iter()
             .map(|dependency| {
                 let dependency_split = dependency.split(' ').collect::<Vec<_>>();
-                let (crate_name, version) = match &*dependency_split {
-                    [crate_name, version, _] => (crate_name, version),
+                Ok(match &*dependency_split {
+                    [crate_name, version, _] => Box::new(LockSource::new_with_manifest(
+                        crate_name,
+                        &Some(version.to_string()),
+                        self.manifest.clone(),
+                        &self.crate_paths,
+                    )?) as Box<dyn CrateRef>,
+                    [crate_name, _] => Box::new(PathSource::new(
+                        self.crate_paths
+                            .get(&crate_name.to_string())
+                            .unwrap_or_else(|| {
+                                panic!(
+                                    "dependency {} of {} path not found in {:?}",
+                                    crate_name,
+                                    self.crate_name(),
+                                    self.crate_paths,
+                                )
+                            }),
+                        &self.crate_paths,
+                    )?) as Box<dyn CrateRef>,
                     _ => Err(CarguixError::BadLockFileDependency(dependency.to_string()))?,
-                };
-                Ok(Box::new(LockSource::new_with_manifest(
-                    crate_name,
-                    &Some(version.to_string()),
-                    self.manifest.clone(),
-                )?) as Box<dyn CrateRef>)
+                })
             })
             .collect()
     }
