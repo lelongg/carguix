@@ -53,7 +53,7 @@ pub enum CarguixError {
     #[error(display = "failure while inserting key {:?} in hash database", _0)]
     HashInsertionFailed(#[error(cause)] rustbreak::BreakError, (String, String)),
     #[error(display = "could not flush hash database")]
-    HashDatabaseFlushFailed(#[error(cause)] rustbreak::BreakError),
+    HashDatabaseFlushFailed(#[error(cause, no_from)] rustbreak::BreakError),
     #[error(display = "could not compute hash of crate {}", _0)]
     GuixHashError(
         #[error(cause)] shellfn::Error<std::convert::Infallible>,
